@@ -1,6 +1,6 @@
 # 🎓 Alumni Tracer System - Daily Project 3
 
-Sistem Pelacakan Alumni Otomatis yang dirancang untuk mengatasi masalah "Disambiguasi Nama" menggunakan algoritma pembobotan skor (*Scoring Logic*). Proyek ini merupakan implementasi dari rancangan sistem pada Daily Project 2.
+Sistem Pelacakan Alumni Otomatis yang dirancang untuk mengatasi masalah "Disambiguasi Nama" menggunakan algoritma pembobotan skor (*Scoring Logic*). Proyek ini merupakan implementasi dari rancangan sistem pada Daily Project 2 yang merupakan pemenuhan tugas Daily project 3 mata kuliah Rekayasa Kebutuhan 6-D.
 
 ---
 
