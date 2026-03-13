@@ -105,7 +105,7 @@ export default function InputAlumni() {
                 <input 
                   type="text" required placeholder="Masukkan nama tanpa gelar..."
                   className="w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold transition-all"
-                  value={form.nama_as_nama_asli}
+                  value={form.nama_asli}
                   onChange={(e) => setForm({...form, nama_asli: e.target.value})}
                 />
               </div>
