@@ -1,164 +1,162 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, use } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { 
-  ArrowLeft, Check, X, ExternalLink, 
-  Target, User, GraduationCap, RefreshCw 
+  ArrowLeft, Linkedin, Instagram, Facebook, Globe, 
+  Mail, Phone, Briefcase, Save, ExternalLink, RefreshCw, ShieldCheck
 } from 'lucide-react';
 
-export default function VerifikasiBukti() {
-  const { id } = useParams();
+export default function VerifikasiDetail({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
-  const [bukti, setBukti] = useState<any[]>([]);
-  const [alumni, setAlumni] = useState<any>(null);
+  const { id } = use(params);
   const [loading, setLoading] = useState(true);
-  const [isUpdating, setIsUpdating] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [alumni, setAlumni] = useState<any>(null);
+  const [bukti, setBukti] = useState<any[]>([]);
 
-  // LOGIKA: Mengambil data alumni dan jejak bukti
+  const [form, setForm] = useState({
+    email: '', no_hp: '', link_linkedin: '', link_ig: '', link_fb: '', link_tiktok: '',
+    tempat_kerja: '', alamat_kerja: '', posisi: '', status_pegawai: 'Swasta', sosmed_kantor: ''
+  });
+
   const fetchData = async () => {
     setLoading(true);
-    const { data: dataAlumni } = await supabase.from('alumni').select('*').eq('id', id).single();
-    setAlumni(dataAlumni);
-    
-    const { data: dataBukti } = await supabase.from('hasil_pelacakan').select('*').eq('alumni_id', id);
-    setBukti(dataBukti || []);
+    const { data: alumniData } = await supabase.from('alumni').select('*').eq('id', id).single();
+    if (alumniData) {
+      setAlumni(alumniData);
+      
+      const { data: buktiData } = await supabase.from('hasil_pelacakan').select('*').eq('alumni_id', id);
+      setBukti(buktiData || []);
+
+      // PREDICTIVE AUTO-FILL LOGIC
+      // Mengisi form secara otomatis sebagai draf untuk di-cross check
+      setForm({
+        email: alumniData.email || '', 
+        no_hp: alumniData.no_hp || '',
+        link_linkedin: alumniData.link_linkedin || `https://www.linkedin.com/in/${alumniData.nama_asli.toLowerCase().replace(/\s/g, '')}`,
+        link_ig: alumniData.link_ig || `https://www.instagram.com/${alumniData.nama_asli.toLowerCase().replace(/\s/g, '')}`,
+        link_fb: alumniData.link_fb || '', 
+        link_tiktok: alumniData.link_tiktok || '',
+        tempat_kerja: alumniData.tempat_kerja || '', 
+        alamat_kerja: alumniData.alamat_kerja || '',
+        posisi: alumniData.posisi || `Alumni ${alumniData.prodi} UMM`, // Prediksi Posisi
+        status_pegawai: alumniData.status_pegawai || 'Swasta',
+        sosmed_kantor: alumniData.sosmed_kantor || ''
+      });
+
+      if (!buktiData || buktiData.length === 0) {
+        await runMultiPlatformScan(alumniData);
+      }
+    }
     setLoading(false);
+  };
+
+  const runMultiPlatformScan = async (alumniObj: any) => {
+    setIsScanning(true);
+    const query = encodeURIComponent(`"${alumniObj.nama_asli}" "UMM"`);
+    const platforms = [
+      { name: "LinkedIn", url: `https://www.linkedin.com/search/results/all/?keywords=${query}` },
+      { name: "Instagram", url: `https://www.google.com/search?q=site:instagram.com ${query}` },
+      { name: "Facebook", url: `https://www.facebook.com/search/top/?q=${query}` },
+      { name: "TikTok", url: `https://www.google.com/search?q=site:tiktok.com ${query}` }
+    ];
+
+    const insertData = platforms.map(p => ({
+      alumni_id: id, sumber_temuan: p.name, link_profil: p.url, confidence_score: 50, kategori_hasil: 'Automated'
+    }));
+
+    await supabase.from('hasil_pelacakan').insert(insertData);
+    const { data: newBukti } = await supabase.from('hasil_pelacakan').select('*').eq('alumni_id', id);
+    setBukti(newBukti || []);
+    setIsScanning(false);
   };
 
   useEffect(() => { fetchData(); }, [id]);
 
-  // LOGIKA 1: Validasi Berhasil (Data Cocok)
-  const handleApprove = async () => {
-    const { error } = await supabase.from('alumni').update({ status_pelacakan: 'Teridentifikasi' }).eq('id', id);
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.from('alumni').update({ ...form, status_pelacakan: 'Teridentifikasi' }).eq('id', id);
     if (!error) {
-      alert("Status dikonfirmasi: Teridentifikasi.");
+      alert("Cross-check Selesai! Data Berhasil Diverifikasi.");
       router.push('/daftar-alumni');
     }
   };
 
-  // ---LOGIKA 2: Iterasi Pelacakan (Data Tidak Cocok) ---
-  const handleRejectAndRefresh = async () => {
-    setIsUpdating(true);
-    
-    try {
-      // Step A: Hapus jejak lama yang dianggap salah oleh Admin
-      await supabase.from('hasil_pelacakan').delete().eq('alumni_id', id);
-
-      // Step B: Konstruksi Query Formal
-      const kw1 = "Universitas Muhammadiyah Malang";
-      const kw2 = "University Muhammadiyah of Malang";
-      const queryFormal = `"${alumni?.nama_asli}" ("${kw1}" OR "${kw2}")`;
-
-      // Step C: Menyiapkan Rujukan Baru ke Google Search Engine
-      const searchGoogle = `https://www.google.com/search?q=${encodeURIComponent(queryFormal)}`;
-      
-      const sumberBaru = {
-        alumni_id: id,
-        sumber_temuan: "Google Search Engine (Iterasi 2)",
-        link_profil: searchGoogle,
-        confidence_score: 50, // Skor default untuk pencarian manual
-        skor_nama: 50,
-        skor_afiliasi: 0,
-        kategori_hasil: 'Perlu Verifikasi Ulang'
-      };
-
-      // Step D: Masukkan sumber pelacakan baru ke database
-      await supabase.from('hasil_pelacakan').insert([sumberBaru]);
-      
-      // Step E: Pastikan status alumni tetap/kembali ke 'Perlu Verifikasi Manual'
-      await supabase.from('alumni').update({ status_pelacakan: 'Perlu Verifikasi Manual' }).eq('id', id);
-
-      alert("Jejak lama dihapus. Sistem mengalihkan rujukan ke Google Search Engine dengan keyword formal.");
-      
-      // Step F: Refresh data lokal untuk memperbarui tampilan kartu bukti
-      fetchData(); 
-    } catch (err) {
-      console.error("Gagal melakukan iterasi pelacakan:", err);
-    } finally {
-      setIsUpdating(false);
-    }
-  };
-  // --- END LOGIKA ---
-
-  if (loading) return <div className="p-10 text-center text-gray-400">Memuat analisis bukti...</div>;
+  if (loading) return <div className="p-20 text-center font-black animate-pulse">PREDICTING IDENTITY...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8 text-black">
-      <div className="max-w-3xl mx-auto">
-        <button onClick={() => router.push('/daftar-alumni')} className="flex items-center gap-2 text-gray-400 hover:text-blue-600 mb-6 transition">
-          <ArrowLeft size={18} /> Kembali ke Dashboard
-        </button>
+    <div className="min-h-screen bg-gray-50 p-8 text-black">
+      <div className="max-w-6xl mx-auto">
+        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-400 hover:text-blue-600 mb-8 font-bold text-xs uppercase tracking-widest"><ArrowLeft size={16}/> Back</button>
 
-        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-8 border-b bg-gradient-to-br from-blue-50 to-white">
-            <h1 className="text-3xl font-black text-gray-900">{alumni?.nama_asli}</h1>
-            <p className="text-gray-500 font-bold text-sm uppercase tracking-wider">NIM: {alumni?.nim} • {alumni?.prodi}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* TRACKING REFERENCE PANEL */}
+          <div className="lg:col-span-5 space-y-6">
+            <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 p-8">
+              <div className="flex items-center gap-3 mb-6 text-blue-600">
+                <ShieldCheck size={24}/> <h2 className="font-black text-xs uppercase tracking-widest">Tracking Reference</h2>
+              </div>
+              <div className="space-y-3">
+                {bukti.map((b) => (
+                  <a key={b.id} href={b.link_profil} target="_blank" className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-blue-600 hover:text-white transition-all font-bold text-xs uppercase group">
+                    <span>Cari di {b.sumber_temuan}</span> <ExternalLink size={14}/>
+                  </a>
+                ))}
+              </div>
+            </div>
+            <div className="bg-gray-900 text-white p-8 rounded-[2rem] shadow-xl">
+              <p className="text-2xl font-black">{alumni?.nama_asli}</p>
+              <p className="text-blue-400 font-bold text-xs mt-1 uppercase tracking-widest">{alumni?.prodi} • {alumni?.nim}</p>
+            </div>
           </div>
 
-          <div className="p-8 space-y-8">
-            {bukti.map((item) => (
-              <div key={item.id} className="space-y-6">
-                <div className="bg-blue-600 text-white p-6 rounded-2xl flex justify-between items-center shadow-lg shadow-blue-200">
-                  <div>
-                    <p className="text-blue-100 text-[10px] font-black uppercase tracking-widest mb-1">Confidence Score</p>
-                    <p className="text-5xl font-black">{item.confidence_score}%</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-blue-100 text-[10px] font-black uppercase tracking-widest mb-1">Sumber Analisis</p>
-                    <p className="text-lg font-bold">{item.sumber_temuan}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-white border border-gray-100 rounded-xl flex items-center gap-3">
-                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><User size={18}/></div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase">Skor Nama</p>
-                      <p className="text-lg font-black text-gray-800">{item.skor_nama}%</p>
-                    </div>
-                  </div>
-                  <div className="p-4 bg-white border border-gray-100 rounded-xl flex items-center gap-3">
-                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><GraduationCap size={18}/></div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase">Skor Afiliasi</p>
-                      <p className="text-lg font-black text-gray-800">{item.skor_afiliasi}%</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-6 border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50">
-                  <h3 className="text-xs font-black text-gray-400 uppercase mb-4 tracking-widest">Link Informasi Terdeteksi</h3>
-                  <div className="space-y-3">
-                    <a href={item.link_profil} target="_blank" className="flex items-center justify-between p-4 bg-white rounded-xl border border-gray-200 hover:border-blue-500 transition group">
-                      <span className="text-sm font-bold text-gray-700 group-hover:text-blue-600 tracking-tight">Periksa Bukti Keterkaitan</span>
-                      <ExternalLink size={16} className="text-gray-300 group-hover:text-blue-600" />
-                    </a>
-                  </div>
-                </div>
+          {/* CROSS-CHECK FORM */}
+          <div className="lg:col-span-7">
+            <form onSubmit={handleSave} className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
+              <div className="p-8 border-b bg-gray-50 flex justify-between items-center">
+                <h2 className="font-black text-lg uppercase tracking-tight">Cross-Check 8 Points</h2>
+                {isScanning && <RefreshCw className="animate-spin text-blue-600" size={18}/>}
               </div>
-            ))}
+              <div className="p-10 space-y-8">
+                <section className="space-y-4">
+                  <h4 className="section-title"><Mail size={14}/> 1. Kontak (Email & HP)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="email" placeholder="Email" className="form-input" value={form.email} onChange={(e) => setForm({...form, email: e.target.value})} />
+                    <input type="text" placeholder="No HP/WhatsApp" className="form-input" value={form.no_hp} onChange={(e) => setForm({...form, no_hp: e.target.value})} />
+                  </div>
+                </section>
 
-            <div className="flex flex-col gap-3 pt-6 border-t">
-              <button 
-                onClick={handleApprove}
-                className="w-full bg-green-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-green-700 transition shadow-lg shadow-green-100"
-              >
-                <Check className="inline mr-2" size={18}/> Konfirmasi Valid
-              </button>
-              <button 
-                onClick={handleRejectAndRefresh}
-                disabled={isUpdating}
-                className="w-full bg-white border-2 border-red-50 text-red-600 py-4 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-red-50 transition"
-              >
-                {isUpdating ? <RefreshCw className="animate-spin inline mr-2" size={18}/> : <X className="inline mr-2" size={18}/>}
-                Data Salah (Cari Sumber Baru)
-              </button>
-            </div>
+                <section className="space-y-4">
+                  <h4 className="section-title"><Globe size={14}/> 2. Digital Identity (Predictive Fill)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="text" placeholder="LinkedIn URL" className="form-input border-blue-100 bg-blue-50/30" value={form.link_linkedin} onChange={(e) => setForm({...form, link_linkedin: e.target.value})} />
+                    <input type="text" placeholder="Instagram URL" className="form-input border-blue-100 bg-blue-50/30" value={form.link_ig} onChange={(e) => setForm({...form, link_ig: e.target.value})} />
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <h4 className="section-title"><Briefcase size={14}/> 3. Professional Details</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="text" placeholder="Tempat Kerja" className="form-input" value={form.tempat_kerja} onChange={(e) => setForm({...form, tempat_kerja: e.target.value})} />
+                    <input type="text" placeholder="Posisi" className="form-input bg-blue-50/30 border-blue-100" value={form.posisi} onChange={(e) => setForm({...form, posisi: e.target.value})} />
+                  </div>
+                </section>
+
+                <button type="submit" className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:bg-black transition-all flex items-center justify-center gap-2">
+                  <Save size={18}/> Confirm & Save Verification
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       </div>
+      <style jsx>{`
+        .section-title { display: flex; align-items: center; gap: 0.5rem; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; color: #2563eb; }
+        .form-input { width: 100%; padding: 1.25rem; background: #f8fafc; border: 1px solid #f1f5f9; border-radius: 1.25rem; outline: none; font-weight: 800; font-size: 0.75rem; transition: all 0.2s; }
+        .form-input:focus { border-color: #2563eb; background: white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+      `}</style>
     </div>
   );
 }
